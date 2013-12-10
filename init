@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Linuxium's init ... boots Linux from SD card or Android/Linux from NAND with option to install Linux on NAND
+# Boots Linux from SD card or Android/Linux from NAND
 
 # Insert NAND module
 insmod ./rk30xxnand_ko.ko.3.0.36+
