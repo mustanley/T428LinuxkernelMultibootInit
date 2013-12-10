@@ -87,7 +87,7 @@ if [ -b /dev/mtdblock6 ] ; then
 			while true; do
 				clear
 				echo
-				echo "  Linuxium's grubesque boot menu"
+				echo "            boot menu"
 				echo
 				echo " ----------------------------------"
 				echo "|	    			 |"
