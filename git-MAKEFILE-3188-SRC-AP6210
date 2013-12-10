@@ -1,0 +1,110 @@
+#!/bin/bash
+
+DEVELOPMENT_DIR=/root/kernel
+LINUX_NAME=git-3188-SRC-AP6210
+LINUX_SOURCE_DIR=${DEVELOPMENT_DIR}/${LINUX_NAME}/kernel_ruikemei
+KERNEL_VERSION=3.0.36
+PLUS_SYMBOL=+
+IMAGE_DIR=${DEVELOPMENT_DIR}/images-rk3XXX_mod_tool/unpack/Image
+
+QUESTION_COMPILED_OK="MAKEFILE: Did it compile okay? "
+
+ask()
+{
+    QUESTION_TEXT=$*
+    ANSWER=""
+    while [ "${ANSWER}" != "Y" ]; do
+        echo -n ${QUESTION_TEXT}" (y or ctrl-C) "
+        read ANSWER
+        ANSWER=`echo ${ANSWER} | tr '[:lower:]' '[:upper:]'`
+    done
+}
+
+get_release_name()
+{
+    echo "MAKEFILE: Getting release name ..."
+    if [ -f ${LINUX_SOURCE_DIR}/.config ] ; then
+        RELEASE_NAME=`fgrep CONFIG_LOCALVERSION= ${LINUX_SOURCE_DIR}/.config | sed 's/CONFIG_LOCALVERSION=//' | sed 's/"//g'`
+    elif [ -f ${DEVELOPMENT_DIR}/${LINUX_NAME}.config ] ; then
+        RELEASE_NAME=`fgrep CONFIG_LOCALVERSION= ${DEVELOPMENT_DIR}/${LINUX_NAME}.config | sed 's/CONFIG_LOCALVERSION=//' | sed 's/"//g'`
+    else
+        echo "MAKEFILE: Exiting ... No valid .config file available."
+        exit
+    fi
+    if [ -z "${RELEASE_NAME}" ] ; then
+        echo "MAKEFILE: Warning ... Release name not specified in .config file."
+    fi
+}
+
+compile_kernel()
+{
+    echo "MAKEFILE: Compiling Linux kernel ..."
+    cd ${LINUX_SOURCE_DIR}
+    if [ -f .config ] ; then
+        cp .config ${DEVELOPMENT_DIR}/${LINUX_NAME}.config
+    fi
+    LANG=C make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- mrproper
+    cp ${DEVELOPMENT_DIR}/${LINUX_NAME}.config .config
+    rm -rf ${LINUX_SOURCE_DIR}/output
+    LANG=C make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -j2
+    ask ${QUESTION_COMPILED_OK}
+}
+
+compile_modules()
+{
+    echo "MAKEFILE: Compiling modules ..."
+    cd ${LINUX_SOURCE_DIR}
+    rm -rf ${LINUX_SOURCE_DIR}/output
+    LANG=C make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -j2 INSTALL_MOD_PATH=output modules
+    LANG=C make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -j2 INSTALL_MOD_PATH=output modules_install
+    ask ${QUESTION_COMPILED_OK}
+}
+
+create_modules_and_firmware()
+{
+    echo "MAKEFILE: Copying modules ..."
+    cd ${LINUX_SOURCE_DIR}/output/lib/modules
+    find ${KERNEL_VERSION}${RELEASE_NAME}${PLUS_SYMBOL} -depth -print | cpio -ov > ${DEVELOPMENT_DIR}/${LINUX_NAME}-modules
+    cd ${DEVELOPMENT_DIR}
+    echo "MAKEFILE: Copying firmware ..."
+    cd ${DEVELOPMENT_DIR}
+    if [ ! -d /mnt/system ] ; then
+        mkdir /mnt/system
+    fi
+    mount ${IMAGE_DIR}/system.img /mnt/system
+    rm -rf ${DEVELOPMENT_DIR}/firmware
+    mkdir -p ${DEVELOPMENT_DIR}/firmware/system/vendor/firmware
+    mkdir -p ${DEVELOPMENT_DIR}/firmware/system/etc/firmware
+    cp -a {/mnt/system/vendor/firmware/*,/mnt/system/vendor/firmware/.[^.]*} ${DEVELOPMENT_DIR}/firmware/system/vendor/firmware/ > /dev/null 2>&1
+    cp -a {/mnt/system/etc/firmware/*,/mnt/system/etc/firmware/.[^.]*} ${DEVELOPMENT_DIR}/firmware/system/etc/firmware/ > /dev/null 2>&1
+    sync
+    echo "MAKEFILE: Copying Android modules ..."
+    cd ${DEVELOPMENT_DIR}
+    rm -rf ${DEVELOPMENT_DIR}/android-modules
+    mkdir ${DEVELOPMENT_DIR}/android-modules
+    cp -a /mnt/system/lib/modules/* ${DEVELOPMENT_DIR}/android-modules
+    cp ${IMAGE_DIR}/boot-cpio/rk30xxnand_ko.ko.3.0.36+ ${DEVELOPMENT_DIR}/android-modules
+}
+
+next_steps_image()
+{
+    echo "MAKEFILE: Run ./MAKE_KERNEL and then copy linuxium-recovery.img to WINDOWS and flash as recovery"
+    echo "MAKEFILE: Mount the Ubuntu ROOTFS sdcard (e.g. /media/linuxroot) and update the modules"
+    echo "MAKEFILE:	cp -a ${LINUX_SOURCE_DIR}/output/lib/modules/${KERNEL_VERSION}${RELEASE_NAME}${PLUS_SYMBOL} /media/linuxroot/lib/modules"
+    echo "MAKEFILE: And add the Android firmware"
+    echo "MAKEFILE:	mkdir -p /media/linuxroot/system/vendor/firmware"
+    echo "MAKEFILE:	mkdir -p /media/linuxroot/system/etc/firmware"
+    echo "MAKEFILE:	cp -a {${DEVELOPMENT_DIR}/firmware/system/vendor/firmware/*,${DEVELOPMENT_DIR}/firmware/system/vendor/firmware/.[^.]*} /media/linuxroot/system/vendor/firmware/ > /dev/null 2>&1"
+    echo "MAKEFILE:	cp -a {${DEVELOPMENT_DIR}/firmware/system/etc/firmware/*,${DEVELOPMENT_DIR}/firmware/system/etc/firmware/.[^.]*} /media/linuxroot/system/etc/firmware/ > /dev/null 2>&1"
+    echo "MAKEFILE: And the Android modules"
+    echo "MAKEFILE:     cp -a ${DEVELOPMENT_DIR}/android-modules/* /media/linuxroot/lib/modules"
+    echo "MAKEFILE:	umount /media/linuxroot"
+}
+
+echo "MAKEFILE: Started ..."
+    get_release_name
+    compile_kernel
+    compile_modules
+    create_modules_and_firmware
+    next_steps_image
+echo "MAKEFILE: Finished."

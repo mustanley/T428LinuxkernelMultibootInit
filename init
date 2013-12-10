@@ -1,0 +1,251 @@
+#!/bin/sh
+
+# Linuxium's init ... boots Linux from SD card or Android/Linux from NAND with option to install Linux on NAND
+
+# Insert NAND module
+insmod ./rk30xxnand_ko.ko.3.0.36+
+
+# Mount minimum kernel directories
+[ -d /dev ] || mkdir /dev
+mount -t devtmpfs -o mode=0755 udev /dev
+[ -d /sys ] || mkdir /sys
+mount -t sysfs -o nodev,noexec,nosuid sysfs /sys
+[ -d /proc ] || mkdir /proc
+mount -t proc -o nodev,noexec,nosuid proc /proc
+[ -d /mnt ] || mkdir /mnt
+[ -d /system ] || mkdir /system
+
+# Check Android's toolbox is available
+TOOLBOX=false
+if [ -b /dev/mtdblock8 ] ; then
+	mount -t ext4 /dev/mtdblock8 /system && TOOLBOX=true
+	if ${TOOLBOX} ; then
+		if [ ! -x /system/bin/toolbox ] ; then
+			TOOLBOX=false
+		fi
+	fi
+fi
+if ! ${TOOLBOX} ; then
+	panic "Android toolbox not found ... make sure Android is installed ... exiting."
+	exit
+fi
+
+# Check for an SD card and boot if Linux
+SD_LINUX=false
+if [ -b /dev/mmcblk0p1 ] ; then
+	[ -d /mnt/sdcard ] || mkdir /mnt/sdcard
+	mount -t ext4 /dev/mmcblk0p1 /mnt/sdcard && SD_LINUX=true
+	if ${SD_LINUX} ; then
+		if [ -f /mnt/sdcard/sbin/init ] ; then
+			# Booting Linux from SD card
+			umount /mnt/sdcard
+			/system/bin/toolbox reboot recovery
+		fi
+		# SD card is probably not a Linux RFS
+		umount /mnt/sdcard
+	fi
+fi
+
+# Get boot priority
+INITIAL_BOOT=true
+if [ -b /dev/mtdblock6 ] ; then
+	[ -d /mnt/data ] || mkdir /mnt/data
+	mount -t ext4 /dev/mtdblock6 /mnt/data && INITIAL_BOOT=false
+	if ${INITIAL_BOOT} ; then
+		# As /data has not been created yet assume initial boot so boot Android
+		umount /system
+		umount /dev
+		umount /sys
+		umount /proc
+		/init-android "$@"
+	fi
+	BOOT_OS=
+	if [ -r /mnt/data/.BOOT_OS ] ; then
+		BOOT_OS=`cat /mnt/data/.BOOT_OS`
+	fi
+	if [ -z "${BOOT_OS}" ] ; then
+		# Boot priority not set
+		# Insert FRAMEBUFFER modules to provide console display
+		insmod /lib/modules/3.0.36+/kernel/drivers/video/console/softcursor.ko
+		insmod /lib/modules/3.0.36+/kernel/drivers/video/console/bitblit.ko
+		insmod /lib/modules/3.0.36+/kernel/drivers/video/console/font.ko
+		insmod /lib/modules/3.0.36+/kernel/drivers/video/console/fbcon.ko
+		# Disable dmesg to console
+		echo "1 1 1 7" > /proc/sys/kernel/printk
+       		if [ -f /mnt/data/.BOOT_OS -a ! -w /mnt/data/.BOOT_OS ] ; then
+			COMMAND_FAILED=true
+	       		rm -f /mnt/data/.BOOT_OS && COMMAND_FAILED=false
+			if ${COMMAND_FAILED} ; then
+				echo
+				read -p "Cannot set boot priority ... press <return> to reboot" PAUSE
+				umount /mnt/data
+				/system/bin/toolbox reboot
+			fi
+		else
+			# Start a grubesque menu
+			TIMEOUT=10
+			while true; do
+				clear
+				echo
+				echo "  Linuxium's grubesque boot menu"
+				echo
+				echo " ----------------------------------"
+				echo "|	    			 |"
+				echo "| 1 - Android			 |"
+				echo "| 2 - Linux			 |"
+				echo "|	    			 |"
+				echo " ----------------------------------"
+				echo
+				echo "Enter 1 or 2 to boot the selected OS."
+				echo
+				[ ${TIMEOUT} -gt 0 ] && echo "Option 1 will be booted automatically in ${TIMEOUT} seconds."
+				echo
+				read -n 1 -t ${TIMEOUT} ANSWER
+				echo
+				case "${ANSWER}" in
+					2)
+						echo linux > /mnt/data/.BOOT_OS
+						echo
+						read -p "Linux selected as OS ... this can be changed by running the command 'android' ... press <return> to continue." PAUSE
+						umount /mnt/data
+						/system/bin/toolbox reboot
+					;;
+					*)
+						echo android > /mnt/data/.BOOT_OS
+						echo
+						read -p "Android selected as OS ... this can be changed by removing the file /data/.BOOT_OS ... press <return> to continue." PAUSE
+						umount /mnt/data
+						/system/bin/toolbox reboot
+					;;
+				esac
+			done
+		fi
+	fi
+	umount /mnt/data
+	if [ ${BOOT_OS} != "linux" ] ; then
+		# If set to anything other than Linux default to Android
+		BOOT_OS=android
+	fi
+else
+	panic "Cannot access Android file system ... make sure Android is correctly installed ... exiting."
+	exit
+fi
+
+if [ ${BOOT_OS} = "android" ] ; then
+	# Booting Android from NAND
+	umount /system
+	umount /dev
+	umount /sys
+	umount /proc
+	/init-android "$@"
+fi
+
+if [ ${BOOT_OS} = "linux" ] ; then
+	NAND_LINUX=false
+	if [ -b /dev/mtdblock9 ] ; then
+		[ -d /mnt/nand ] || mkdir /mnt/nand
+		mount -t ext4 /dev/mtdblock9 /mnt/nand && NAND_LINUX=true
+		if ${NAND_LINUX} ; then
+			if [ -f /mnt/nand/sbin/init ] ; then
+				# Booting Linux from NAND
+				umount /mnt/nand
+				/system/bin/toolbox reboot recovery
+			else
+				# NAND is probably not a Linux RFS
+				NAND_LINUX=false
+				umount /mnt/nand
+			fi
+		fi
+		if ! ${NAND_LINUX} ; then
+			# Insert FRAMEBUFFER modules to provide console display
+			insmod /lib/modules/3.0.36+/kernel/drivers/video/console/softcursor.ko
+			insmod /lib/modules/3.0.36+/kernel/drivers/video/console/bitblit.ko
+			insmod /lib/modules/3.0.36+/kernel/drivers/video/console/font.ko
+			insmod /lib/modules/3.0.36+/kernel/drivers/video/console/fbcon.ko
+			# Disable dmesg to console
+			echo "1 1 1 7" > /proc/sys/kernel/printk
+			# Check if Linux should be installed and booted from NAND
+			clear
+			echo
+			read -n 1 -p "Do you want to install Linux to NAND (y/n)? " ANSWER
+			echo
+			if [ ${ANSWER} = "y" ] ; then
+				echo "Installing Linux to NAND ..."
+				echo
+				COMMAND_FAILED=true
+				mke2fs -t ext4 /dev/mtdblock9 && COMMAND_FAILED=false
+				if ${COMMAND_FAILED} ; then
+					read -p "Cannot create Linux NAND empty file system ... press <return> to reboot" PAUSE
+					/system/bin/toolbox reboot
+				fi
+				NAND_LINUX=false
+				mount -t ext4 /dev/mtdblock9 /mnt/nand && NAND_LINUX=true
+				if ${NAND_LINUX} ; then
+					echo "Linux NAND empty file system created ..."
+					echo
+					echo "Insert an SD card containing a valid Linux root file system ..."
+					echo
+					read -p "Ready to start (y/n)? " ANSWER
+					echo
+					if [ ${ANSWER} = "y" ] ; then
+						if [ ! -b /dev/mmcblk0p1 ] ; then
+							read -p "SD card not found ... installation failed ... press <return> to reboot." PAUSE
+							umount /mnt/nand
+							/system/bin/toolbox reboot
+						else
+							[ -d /mnt/sdcard ] || mkdir /mnt/sdcard
+							SD_LINUX=false
+							echo "Mounting SD card ..."
+							mount -t ext4 /dev/mmcblk0p1 /mnt/sdcard && SD_LINUX=true
+							if ${SD_LINUX} ; then
+								if [ ! -f /mnt/sdcard/sbin/init ] ; then
+									read -p "SD card does not contain Linux ... installation failed press <return> to reboot." PAUSE
+									umount /mnt/nand /mnt/sdcard
+									/system/bin/toolbox reboot
+								else
+									echo "Copying SD root file system to NAND ..."
+									for DIRECTORY in bin etc home lib opt root sbin system tmp usr var; do
+										echo "Copying ${DIRECTORY} ... "
+										cp -a /mnt/sdcard/${DIRECTORY} /mnt/nand
+										sync
+										echo "Copied ... "
+									done
+									echo "Data directories copied ... "
+									echo "Creating runtime directories ... "
+									mkdir /mnt/nand/boot /mnt/nand/dev /mnt/nand/media /mnt/nand/mnt /mnt/nand/proc /mnt/nand/run /mnt/nand/selinux /mnt/nand/srv /mnt/nand/sys
+									echo "Runtime directories created ... "
+									echo "Emptying temporary and log directories ... "
+									rm -rf /mnt/nand/tmp/* /mnt/nand/tmp/.[a-z]* /mnt/nand/tmp/.[A-Z]* /mnt/nand/var/log/*
+									echo "Temporary and log directories emptied ... "
+									echo "SD root file system copied to NAND ... "
+									echo
+									umount /mnt/nand /mnt/sdcard
+									read -p "NAND Linux intallation successful ... remove SD card and press <return> to continue." PAUSE
+									# Booting Linux from NAND
+									/system/bin/toolbox reboot recovery
+								fi
+							else
+								read -p "Cannot mount SD card ... installation failed ... press <return> to reboot." PAUSE
+								umount /mnt/nand
+								/system/bin/toolbox reboot
+							fi
+						fi
+					else
+						read -p "NAND Linux intallation cancelled ... press <return> to reboot." PAUSE
+						umount /mnt/nand
+						/system/bin/toolbox reboot
+					fi
+				else
+					read -p "Cannot create NAND file system ... installation failed ... press <return> to reboot." PAUSE
+					/system/bin/toolbox reboot
+				fi
+			else
+				read -p "No bootable Linux available ... press <return> to reboot." PAUSE
+				/system/bin/toolbox reboot
+			fi
+		fi
+	else
+		panic "NAND device not found ... exiting."
+		exit
+	fi
+fi

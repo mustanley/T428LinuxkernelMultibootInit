@@ -1,0 +1,27 @@
+#!/bin/bash
+
+INITRAMFS=true
+
+DEVELOPMENT_DIR=/root/kernel
+LINUX_NAME=git-3188-SRC-AP6210
+LINUX_SOURCE_DIR=${DEVELOPMENT_DIR}/${LINUX_NAME}/kernel_ruikemei
+KERNEL_VERSION=3.0.36
+PLUS_SYMBOL=+
+KITCHEN_DIR=${DEVELOPMENT_DIR}/kitchen
+KITCHEN_TOOLS=${KITCHEN_DIR}/rk-tools
+TOOLS=${DEVELOPMENT_DIR}/tools
+
+echo "MAKEFILE: Started ..."
+cd ${DEVELOPMENT_DIR}
+if ${INITRAMFS} ; then
+	IMAGE=linuxium-recovery.img
+	rm -f ${IMAGE}
+	${TOOLS}/mkbootimg --kernel ${LINUX_SOURCE_DIR}/arch/arm/boot/Image --ramdisk initramfs-3.0.36/fakeramdisk.gz --base 60400000 --pagesize 16384 --ramdiskaddr 62000000 -o ${DEVELOPMENT_DIR}/${IMAGE}
+else
+	IMAGE=linuxium-kernel.img
+	rm -f ${IMAGE}
+	${KITCHEN_TOOLS}/mkkrnlimg -a ${LINUX_SOURCE_DIR}/arch/arm/boot/zImage ${DEVELOPMENT_DIR}/${IMAGE}
+fi
+echo "MAKEFILE: ${IMAGE} created ..."
+echo "MAKEFILE: Finished."
+

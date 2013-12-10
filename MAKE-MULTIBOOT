@@ -1,0 +1,22 @@
+#!/bin/bash
+
+DEVELOPMENT_DIR=/root/kernel
+MULTIBOOT_SOURCE=${DEVELOPMENT_DIR}/multiboot
+MULTIBOOT_IMAGE=multiboot.img
+
+KITCHEN_DIR=${DEVELOPMENT_DIR}/kitchen
+KITCHEN_TOOLS=${KITCHEN_DIR}/rk-tools
+
+echo "MAKEFILE: Started ..."
+cd ${DEVELOPMENT_DIR}
+rm -f ${MULTIBOOT_IMAGE} initramfs.cpio initramfs.cpio.gz > /dev/null 2>&1
+echo "MAKEFILE: Creating multiboot image ..."
+cd ${MULTIBOOT_SOURCE}
+find . | cpio -o -H newc > ../initramfs.cpio
+cd ..
+gzip initramfs.cpio
+${KITCHEN_TOOLS}/mkkrnlimg -a initramfs.cpio.gz ${DEVELOPMENT_DIR}/${MULTIBOOT_IMAGE}
+rm -f initramfs.cpio initramfs.cpio.gz
+echo "MAKEFILE: ${MULTIBOOT_IMAGE} created ..."
+echo "MAKEFILE: Finished."
+

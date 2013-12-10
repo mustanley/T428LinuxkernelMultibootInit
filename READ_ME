@@ -1,0 +1,116 @@
+		Tutorial on compiling Linuxium's Multiboot software for RK3188 devices
+		======================================================================
+
+I will use examples in this tutorial based on the latest official Rikomagic Android and Linux software.  
+You can use your own ROM and Linux source kernels with minor modifications to the files provided.
+
+
+Prerequisites
+
+	On Linux you will need at least git (aptitude install git-core) and 7z (aptitude install p7zip-full)
+	On Windows you will need RKAndroidToolv1.37 which can be downloaded from 
+	https://docs.google.com/file/d/0B99O3A0dDe67dUQ4VzVvZERfWW8
+
+
+Software preparation
+
+1.  Download the multiboot-development-pack from G+ and unzip it:
+	7z e multiboot-development-pack.7z
+2.  Unpack the "tools" directory:
+	7z e tools.cpio.7z
+	cpio -ivdum < tools.cpio
+3.  Edit the pseudo makefile shell script that builds the Linux kernel to reflect the correct paths:	
+	vi git-MAKEFILE-3188-SRC-AP6210
+		on line 3 change the value of the variable DEVELOPMENT_DIR to your current directory
+	chmod 700 git-MAKEFILE-3188-SRC-AP6210
+4.  Edit the pseudo makefile shell script that builds the recovery image to reflect the correct paths:
+	vi MAKE-KERNEL
+		on line 5 change the value of the variable DEVELOPMENT_DIR to your current directory
+	chmod 700 MAKE-KERNEL
+5.  Download your Linux source e.g. https://github.com/linuxium/3188-SRC-AP6210
+	git clone https://github.com/linuxium/3188-SRC-AP6210 git-3188-SRC-AP6210
+6.  Copy the development config file ready for compiling:
+	cp git-3188-SRC-AP6210.config-fb-fix-4-chromium-drm-hdmi-1080-boot-mk802iv-multiboot git-3188-SRC-AP6210.config
+	cp git-3188-SRC-AP6210.config git-3188-SRC-AP6210/kernel_ruikemei/.config
+7.  Compile the Linux kernel:
+	./git-MAKEFILE-3188-SRC-AP6210
+8.  Build the recovery image:
+	./MAKE-KERNEL
+    The image linuxium-recovery.img is created ready for flashing as recovery
+9.  Unpack the "kitchen" tools:
+	7z e kitchen.cpio.7z
+	cpio -ivdum < kitchen.cpio
+10. Edit the pseudo makefile shell script that builds the multiboot initramfs to reflect the correct paths:
+	vi MAKE-MULTIBOOT
+		on line 3 change the value of the variable DEVELOPMENT_DIR to your current directory
+	chmod 700 MAKE-MULTIBOOT
+11. Download your Android ROM e.g. latest Android ROM for the new model MK802IV from 
+    http://www.rikomagic.com/en/download/download_22_1.html and unzip it:
+	unzip IV_AP6210_20130905_1080P.zip
+12. Unpack the ROM image:
+	7z e images-rk3XXX_mod_tool.cpio.7z
+	cpio -ivdum < images-rk3XXX_mod_tool.cpio
+	cp IV_AP6210_20130905_1080P/IV_AP6210_20130905_1080P.img images-rk3XXX_mod_tool/unpack
+	cd images-rk3XXX_mod_tool/unpack
+	./rkunpack IV_AP6210_20130905_1080P.img
+	./unpack-boot
+	cd ../..
+    This will create a directory images-rk3XXX_mod_tool/unpack/Image/boot-cpio which contains the Android initramfs
+    The files kernel.img and system.img in images-rk3XXX_mod_tool/unpack/Image are ready for flashing as kernel and system 
+13. Create the multiboot initramfs directory:
+	mkdir multiboot
+14. Copy the Android boot initramfs to the multiboot directory:
+	cp -a images-rk3XXX_mod_tool/unpack/Image/boot-cpio/* multiboot
+15. Rename the Android init to allow replacement with the multiboot init:
+	cd multiboot
+	mv init init-android
+	cd sbin
+	rm ueventd
+	ln -s ../init-android ueventd
+	ln -s ../init-android watchdogd
+	cd ../..
+16. Copy the replacement multiboot init file into the multiboot initramfs directory:
+	cp init multiboot
+	chmod 750 multiboot/init
+17. Unpack the Linux initramfs directory:
+	7z e initramfs-3.0.36.cpio.7z
+	cpio -ivdum < initramfs-3.0.36.cpio
+18. Copy the Linux initramfs binaries and libraries to the multiboot initramfs directory:
+	cp -a initramfs-3.0.36/initramfs-3.0.36+multiboot/bin multiboot
+	cp -a initramfs-3.0.36/initramfs-3.0.36+multiboot/lib multiboot
+    Remember that if the library modules change as part of a kernel build both initramfs-3.0.36 and 
+    multiboot need to be updated together with the Linux RFS
+19. Build the multiboot initramfs:
+	./MAKE-MULTIBOOT
+    The image multiboot.img is created ready for flashing as boot
+20. Create a modified Android parameter that allows messsages to be displayed on the console 
+	sed 's/console=ttyFIQ0//' < images-rk3XXX_mod_tool/unpack/parameter > linuxium-parameter
+    A parameter file linuxium-parameter is created ready for flashing as parameter
+
+
+Installation
+
+	Copy the Loader file from images-rk3XXX_mod_tool/unpack and the parameter, kernel, boot and recovery files to Windows.
+	Connect your 3188 device in bootloader mode and first "EraseIDB" before flashing the files
+	This will load the Android ROM, Linux kernel and the multiboot software.
+
+	The initial boot is, as always, the slowest and you will be automatically taken to Android.
+
+	Subsequently on booting, if a boot OS default is not already set, a grubesque menu will be 
+	displayed allowing a choice of either Android or Linux.
+
+	However whenever you boot with an SD card loaded with a valid Linux root file system, 
+	the Linux kernel (as installed in recovery) will take priority and immediately boot.
+
+	Should you chose to install Linux as the primary OS, the software will check if a Linux root file system 
+	is available on NAND and if not, it will offer you the opportunity to install one from an SD card.
+
+	Whilst in Android you can change the default boot OS by either removing the file /data/.BOOT_OS 
+	(which will result in the grubesque boot menu to appear on the next boot) or by changing the contents of 
+	this file from "android" to "linux" (e.g. echo linux > /data/.BOOT_OS).  You will need to be "root" to perform these options.
+
+	Additionally within Linux there are two scripts that can be installed into /usr/local/bin 
+	called "android" and "linux".  These will set the boot OS accordingly when run as "root" 
+	and these scripts are downloadable from https://docs.google.com/file/d/0B99O3A0dDe67UklncnlzR3RhQ28 
+	and https://docs.google.com/file/d/0B99O3A0dDe67V1ZjUUdjMGRMbnc respectively.
+
